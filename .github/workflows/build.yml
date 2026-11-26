@@ -1,0 +1,20 @@
+name: Build ESP32-S3 Firmware
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO
+        run: pip install -U platformio
+      - name: Build Binary
+        run: pio run
+      - name: Upload .bin Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-s3-n16r8-binaries
+          path: .pio/build/esp32-s3-devkitc-1/*.bin
