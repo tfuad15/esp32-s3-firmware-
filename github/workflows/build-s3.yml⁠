@@ -1,15 +1,4 @@
-name: Build ESP32-S3-N16R8 Firmware
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    container:
-      image: espressif/idf:release-v5.5
+essif/idf:release-v5.5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
