@@ -1,0 +1,31 @@
+name: Build ESP32-S3 ESP-IDF
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build ESP32-S3 firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          target: esp32s3
+          esp_idf_version: v5.3.2
+
+      - name: Merge binaries into single .bin
+        run: |
+          . $IDF_PATH/export.sh
+          cd build
+          esptool.py --chip esp32s3 merge_bin -o s3_n16r8_merged.bin @flash_args
+
+      - name: Upload merged .bin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-n16r8-firmware
+          path: build/s3_n16r8_merged.bin
