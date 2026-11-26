@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <Update.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
@@ -11,7 +12,6 @@
   #define RGB_BUILTIN 48
 #endif
 
-// Wi-Fi Access Point Credentials (Connect from your Android Wi-Fi settings)
 const char* AP_SSID = "ESP32-S3-N16R8-HUB";
 const char* AP_PASS = "12345678";
 
@@ -19,216 +19,155 @@ AsyncWebServer server(80);
 uint8_t* psramBuffer = nullptr;
 size_t psramAllocatedMB = 0;
 
-// Safe user GPIOs on ESP32-S3-N16R8 (Excludes Flash/PSRAM pins 26-37 and USB 19-20)
-const int safePins[] = {1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 39, 40, 41, 42, 47};
-const int numSafePins = sizeof(safePins) / sizeof(safePins[0]);
-
-// Embedded Mobile-Friendly Web UI
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ESP32-S3 N16R8 Control Hub</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ESP32-S3 N16R8 Studio</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #121212; color: #eee; margin: 0; padding: 15px; }
-    h2 { color: #00e5ff; margin-top: 0; }
-    .card { background: #1e1e1e; border-radius: 10px; padding: 15px; margin-bottom: 15px; border: 1px solid #333; }
-    button { background: #00e5ff; color: #000; border: none; padding: 10px 14px; border-radius: 6px; font-weight: bold; margin: 4px 2px; cursor: pointer; }
-    button.off { background: #444; color: #fff; }
-    input, select { background: #2c2c2c; color: #fff; border: 1px solid #555; padding: 8px; border-radius: 6px; margin: 4px 0; }
-    pre { background: #000; padding: 10px; border-radius: 6px; overflow-x: auto; color: #0f0; font-size: 13px; }
+    :root {
+      --bg: #090d16;
+      --card: rgba(20, 28, 46, 0.85);
+      --border: rgba(56, 189, 248, 0.22);
+      --accent: #38bdf8;
+      --accent2: #818cf8;
+      --success: #10b981;
+      --danger: #ef4444;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at top right, #1e1b4b, var(--bg) 60%);
+      color: var(--text);
+      margin: 0;
+      padding: 14px 14px 80px 14px;
+    }
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 4px 18px 4px;
+    }
+    .title { font-size: 20px; font-weight: 800; background: linear-gradient(90deg, #38bdf8, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .badge { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.4); padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    .tabs { display: flex; gap: 6px; background: rgba(15, 23, 42, 0.9); padding: 5px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 16px; position: sticky; top: 8px; z-index: 10; backdrop-filter: blur(10px); }
+    .tab { flex: 1; text-align: center; padding: 9px 4px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; transition: 0.2s; }
+    .tab.active { background: linear-gradient(135deg, #0284c7, #4f46e5); color: #fff; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3); }
+
+    .section { display: none; animation: fadeIn 0.25s ease; }
+    .section.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px; margin-bottom: 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); backdrop-filter: blur(12px); }
+    .card h3 { margin: 0 0 12px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
+
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat-box { background: rgba(9, 13, 22, 0.6); border: 1px solid rgba(255,255,255,0.06); padding: 10px; border-radius: 10px; }
+    .stat-label { font-size: 11px; color: var(--muted); }
+    .stat-val { font-size: 15px; font-weight: 700; margin-top: 3px; color: #fff; }
+
+    .bar-wrap { background: #0f172a; height: 8px; border-radius: 99px; overflow: hidden; margin-top: 8px; }
+    .bar-fill { height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); width: 0%; transition: width 0.4s ease; }
+
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button { flex: 1; min-width: 80px; background: linear-gradient(135deg, #0ea5e9, #3b82f6); color: #fff; border: none; padding: 11px 12px; border-radius: 10px; font-weight: 700; font-size: 13px; cursor: pointer; transition: transform 0.1s, opacity 0.2s; }
+    button:active { transform: scale(0.96); }
+    button.sec { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: var(--text); }
+    button.danger { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+    button.success { background: linear-gradient(135deg, #10b981, #059669); }
+
+    .pin-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 12px; }
+    .pin-chip { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255,255,255,0.12); color: var(--muted); padding: 9px 0; text-align: center; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .pin-chip.selected { background: var(--accent); color: #090d16; border-color: #fff; box-shadow: 0 0 12px rgba(56,189,248,0.5); }
+
+    .rgb-presets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+    .swatch { height: 34px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.2); cursor: pointer; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); margin: 10px 0; }
+    input[type="color"] { width: 100%; height: 42px; border: none; border-radius: 10px; background: none; cursor: pointer; }
+    input[type="file"] { width: 100%; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 10px; border: 1px dashed var(--accent); color: var(--muted); font-size: 12px; }
+
+    .console { background: #05080f; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; font-family: monospace; font-size: 12px; color: #34d399; max-height: 160px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+    .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(80px); background: #1e293b; color: #fff; border: 1px solid var(--accent); padding: 10px 18px; border-radius: 30px; font-size: 13px; font-weight: 600; box-shadow: 0 10px 25px rgba(0,0,0,0.6); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 99; }
+    .toast.show { transform: translateX(-50%) translateY(0); }
   </style>
 </head>
 <body>
-  <h2>ESP32-S3 N16R8 Master Hub</h2>
 
-  <div class="card">
-    <h3>1. System & 8MB PSRAM</h3>
-    <pre id="sys">Loading hardware stats...</pre>
-    <button onclick="api('/psram?mb=4')">Alloc 4MB PSRAM</button>
-    <button class="off" onclick="api('/psram?mb=0')">Free PSRAM</button>
-    <button onclick="loadSys()">Refresh</button>
+  <div class="header">
+    <div>
+      <div class="title">ESP32-S3 N16R8</div>
+      <div style="font-size: 11px; color: var(--muted);">16MB Quad Flash • 8MB Octal PSRAM</div>
+    </div>
+    <div class="badge"><div class="dot"></div> ONLINE</div>
   </div>
 
-  <div class="card">
-    <h3>2. Onboard RGB LED (GPIO 48)</h3>
-    <input type="color" id="rgb" value="#00e5ff" onchange="setRGB(this.value)">
-    <button onclick="setRGB('#ff0000')">Red</button>
-    <button onclick="setRGB('#00ff00')">Green</button>
-    <button onclick="setRGB('#0000ff')">Blue</button>
-    <button class="off" onclick="setRGB('#000000')">Off</button>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('dash', this)">System</div>
+    <div class="tab" onclick="switchTab('gpio', this)">GPIO & RGB</div>
+    <div class="tab" onclick="switchTab('bus', this)">I2C / WiFi</div>
+    <div class="tab" onclick="switchTab('ota', this)">OTA Flash</div>
   </div>
 
-  <div class="card">
-    <h3>3. GPIO Digital / PWM / ADC</h3>
-    Pin: <select id="pin"></select><br>
-    <button onclick="gpio('high')">HIGH (3.3V)</button>
-    <button class="off" onclick="gpio('low')">LOW (0V)</button>
-    <button onclick="gpio('read')">Read Digital & ADC</button><br>
-    PWM Duty (0-255): <input type="range" min="0" max="255" value="128" onchange="pwm(this.value)">
-    <pre id="gpioOut">Ready.</pre>
+  <div id="dash" class="section active">
+    <div class="card">
+      <h3>Hardware Telemetry <span id="uptime" style="font-size:11px;color:var(--muted)">0s</span></h3>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-label">CPU & Temp</div><div class="stat-val" id="cpu">--</div></div>
+        <div class="stat-box"><div class="stat-label">Flash Memory</div><div class="stat-val" id="flash">--</div></div>
+        <div class="stat-box"><div class="stat-label">Internal SRAM</div><div class="stat-val" id="sram">--</div></div>
+        <div class="stat-box"><div class="stat-label">Octal PSRAM</div><div class="stat-val" id="psram">--</div></div>
+      </div>
+      <div style="margin-top:12px; font-size:11px; color:var(--muted); display:flex; justify-content:space-between;">
+        <span>PSRAM Usage</span><span id="psramPct">0%</span>
+      </div>
+      <div class="bar-wrap"><div class="bar-fill" id="psramBar"></div></div>
+      <div class="btn-row">
+        <button onclick="allocPsram(4)">Alloc 4MB PSRAM</button>
+        <button class="sec" onclick="allocPsram(0)">Free PSRAM</button>
+        <button class="sec" onclick="refreshStats()">↻</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Active Radios</h3>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="stat-label">Wi-Fi AP IP</div><div class="stat-val">192.168.4.1</div></div>
+        <div class="stat-box"><div class="stat-label">BLE Beacon</div><div class="stat-val" style="color:var(--success)">Broadcasting</div></div>
+      </div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>4. I2C Bus Scanner (SDA=8, SCL=9)</h3>
-    <button onclick="scan('/i2c', 'i2cOut')">Scan I2C Devices</button>
-    <pre id="i2cOut">Connect sensors to GPIO 8 (SDA) & GPIO 9 (SCL)</pre>
+  <div id="gpio" class="section">
+    <div class="card">
+      <h3>Onboard RGB LED (GPIO 48)</h3>
+      <input type="color" id="rgbPicker" value="#38bdf8" onchange="sendRGB(this.value)">
+      <div class="rgb-presets">
+        <div class="swatch" style="background:#ff0000" onclick="sendRGB('#ff0000')"></div>
+        <div class="swatch" style="background:#00ff00" onclick="sendRGB('#00ff00')"></div>
+        <div class="swatch" style="background:#0066ff" onclick="sendRGB('#0066ff')"></div>
+        <div class="swatch" style="background:#a855f7" onclick="sendRGB('#a855f7')"></div>
+        <div class="swatch" style="background:#000000" onclick="sendRGB('#000000')"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Select Safe GPIO Pin <span id="selPinLabel" style="color:#fff">GPIO 1</span></h3>
+      <div class="pin-grid" id="pinGrid"></div>
+      <div class="btn-row">
+        <button class="success" onclick="setPin('high')">HIGH (3.3V)</button>
+        <button class="danger" onclick="setPin('low')">LOW (0V)</button>
+        <button class="sec" onclick="setPin('read')">Read & ADC</button>
+      </div>
+      <div style="margin-top:14px; font-size:12px; color:var(--muted); display:flex; justify-content:space-between;">
+        <span>PWM Duty Cycle</span><span id="pwmVal">128 / 255</span>
+      </div>
+      <input type="range" min="0" max="255" value="128" oninput="document.getElementById('pwmVal').innerText=this.value+' / 255'" onchange="setPWM(this.value)">
+      <div class="console" id="gpioLog">Tap a pin above and choose an action...</div>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>5. Wi-Fi Spectrum Scanner</h3>
-    <button onclick="scan('/wifi', 'wifiOut')">Scan Nearby Networks</button>
-    <pre id="wifiOut">Tap scan to list 2.4GHz networks...</pre>
-  </div>
-
-<script>
-  const pins =;
-  const sel = document.getElementById('pin');
-  pins.forEach(p => { let o = document.createElement('option'); o.value = p; o.text = 'GPIO ' + p; sel.add(o); });
-
-  async function api(url) { let r = await fetch(url); return await r.text(); }
-  async function loadSys() { document.getElementById('sys').innerText = await api('/sys'); }
-  function setRGB(hex) {
-    let r = parseInt(hex.substr(1,2),16), g = parseInt(hex.substr(3,2),16), b = parseInt(hex.substr(5,2),16);
-    api(`/rgb?r=${r}&g=${g}&b=${b}`);
-  }
-  async function gpio(act) {
-    let p = sel.value;
-    document.getElementById('gpioOut').innerText = await api(`/gpio?p=${p}&act=${act}`);
-  }
-  async function pwm(val) {
-    let p = sel.value;
-    document.getElementById('gpioOut').innerText = await api(`/pwm?p=${p}&val=${val}`);
-  }
-  async function scan(url, target) {
-    document.getElementById(target).innerText = 'Scanning...';
-    document.getElementById(target).innerText = await api(url);
-  }
-  loadSys();
-</script>
-</body>
-</html>
-)rawliteral";
-
-String getSystemInfo() {
-  String s = "";
-  s += "Chip: " + String(ESP.getChipModel()) + " (2 Cores @ " + String(ESP.getCpuFreqMHz()) + " MHz)\n";
-  s += "Internal Temp: " + String(temperatureRead(), 1) + " C\n";
-  s += "Flash Size: " + String(ESP.getFlashChipSize() / (1024 * 1024)) + " MB\n";
-  s += "Free Heap (SRAM): " + String(ESP.getFreeHeap() / 1024) + " KB\n";
-  if (psramFound()) {
-    s += "PSRAM Total: " + String(ESP.getPsramSize() / (1024 * 1024)) + " MB\n";
-    s += "PSRAM Free:  " + String(ESP.getFreePsram() / 1024) + " KB (Test Alloc: " + String(psramAllocatedMB) + " MB)\n";
-  } else {
-    s += "PSRAM: NOT DETECTED\n";
-  }
-  s += "BLE Status: Advertising as 'ESP32-S3-N16R8'\n";
-  s += "AP IP Address: " + WiFi.softAPIP().toString();
-  return s;
-}
-
-void setup() {
-  Serial.begin(115200);
-  neopixelWrite(RGB_BUILTIN, 0, 16, 32);
-
-  // 1. Start Wi-Fi Access Point + STA mode for scanning
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(AP_SSID, AP_PASS);
-
-  // 2. Start Bluetooth Low Energy (BLE) Beacon
-  BLEDevice::init("ESP32-S3-N16R8");
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->start();
-
-  // 3. Initialize Default I2C Bus
-  Wire.begin(8, 9);
-
-  // 4. Web Server Routes
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", index_html);
-  });
-
-  server.on("/sys", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", getSystemInfo());
-  });
-
-  server.on("/psram", HTTP_GET, [](AsyncWebServerRequest *request) {
-    int mb = request->hasParam("mb") ? request->getParam("mb")->value().toInt() : 0;
-    if (psramBuffer != nullptr) {
-      heap_caps_free(psramBuffer);
-      psramBuffer = nullptr;
-      psramAllocatedMB = 0;
-    }
-    if (mb > 0 && psramFound()) {
-      psramBuffer = (uint8_t*)heap_caps_malloc(mb * 1024 * 1024, MALLOC_CAP_SPIRAM);
-      if (psramBuffer) psramAllocatedMB = mb;
-    }
-    request->send(200, "text/plain", getSystemInfo());
-  });
-
-  server.on("/rgb", HTTP_GET, [](AsyncWebServerRequest *request) {
-    int r = request->getParam("r")->value().toInt();
-    int g = request->getParam("g")->value().toInt();
-    int b = request->getParam("b")->value().toInt();
-    neopixelWrite(RGB_BUILTIN, r, g, b);
-    request->send(200, "text/plain", "OK");
-  });
-
-  server.on("/gpio", HTTP_GET, [](AsyncWebServerRequest *request) {
-    int p = request->getParam("p")->value().toInt();
-    String act = request->getParam("act")->value();
-    if (act == "high") {
-      pinMode(p, OUTPUT);
-      digitalWrite(p, HIGH);
-      request->send(200, "text/plain", "GPIO " + String(p) + " set HIGH (3.3V)");
-    } else if (act == "low") {
-      pinMode(p, OUTPUT);
-      digitalWrite(p, LOW);
-      request->send(200, "text/plain", "GPIO " + String(p) + " set LOW (0V)");
-    } else {
-      pinMode(p, INPUT);
-      int dig = digitalRead(p);
-      int adc = analogRead(p);
-      request->send(200, "text/plain", "GPIO " + String(p) + " -> Digital: " + String(dig) + " | Raw ADC (0-4095): " + String(adc));
-    }
-  });
-
-  server.on("/pwm", HTTP_GET, [](AsyncWebServerRequest *request) {
-    int p = request->getParam("p")->value().toInt();
-    int val = request->getParam("val")->value().toInt();
-    analogWrite(p, val);
-    request->send(200, "text/plain", "GPIO " + String(p) + " PWM set to " + String(val) + "/255");
-  });
-
-  server.on("/i2c", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String out = "I2C Scan Results (SDA=8, SCL=9):\n";
-    int count = 0;
-    for (byte addr = 1; addr < 127; addr++) {
-      Wire.beginTransmission(addr);
-      if (Wire.endTransmission() == 0) {
-        out += "- Device found at 0x" + String(addr, HEX) + "\n";
-        count++;
-      }
-    }
-    if (count == 0) out += "No I2C devices found.";
-    request->send(200, "text/plain", out);
-  });
-
-  server.on("/wifi", HTTP_GET, [](AsyncWebServerRequest *request) {
-    int n = WiFi.scanNetworks();
-    String out = "Found " + String(n) + " networks:\n";
-    for (int i = 0; i < n; ++i) {
-      out += String(i + 1) + ": " + WiFi.SSID(i) + " (" + String(WiFi.RSSI(i)) + " dBm)\n";
-    }
-    request->send(200, "text/plain", out);
-  });
-
-  server.begin();
-}
-
-void loop() {
-  // AsyncWebServer handles everything in the background
-  delay(100);
-}
