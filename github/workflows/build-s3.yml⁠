@@ -1,0 +1,31 @@
+name: Build ESP32-S3-N16R8 Firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:release-v5.5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set target and build firmware
+        run: |
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Merge binaries into single .bin
+        run: |
+          cd build
+          esptool.py --chip esp32s3 merge_bin -o s3_n16r8_merged.bin @flash_args
+
+      - name: Upload merged .bin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-n16r8-firmware
+          path: build/s3_n16r8_merged.bin
